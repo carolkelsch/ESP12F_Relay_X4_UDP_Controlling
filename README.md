@@ -25,7 +25,7 @@ The last command can change the state of multiple relays, the structure of the c
 | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
 | - | - | - | - | Relay 4 | Relay 3 | Relay 2 | Relay 1 |
 
-- C#: command mask byte, if bit set to 1 (Open) the respective relay will be opened, if set to 0 (Close), then relay will be closed. Note that this command only works if the relay is set in the relay mask;
+- **C#**: command mask byte, if bit set to 1 (Open) the respective relay will be opened, if set to 0 (Close), then relay will be closed. Note that this command only works if the relay is set in the relay mask;
 
 | Bit 7 | Bit 6 | Bit 5 | Bit 4 | Bit 3 | Bit 2 | Bit 1 | Bit 0 |
 | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
