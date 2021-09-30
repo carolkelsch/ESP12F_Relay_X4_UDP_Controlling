@@ -124,7 +124,7 @@ void notFound(AsyncWebServerRequest *request) {
 
 /*
 Configure WiFi as access point and configure a little webpage to get configurations
-from RaspberryPi wifi network.
+from new WiFi network.
 */
 void configure_wifi_network()
 {
@@ -158,14 +158,14 @@ void configure_wifi_network()
       port_number = request->getParam(PARAM_INPUT_1)->value();
       inputParam = PARAM_INPUT_1;
 
-      // Write SSID from RaspberryPi network on flash
+      // Write SSID from network on flash
       ssid_string.concat('\0');
       ssid_string.toCharArray(data.str, (ssid_string.length()+2));
       ssid_string.toCharArray(WIFI_SSID, (ssid_string.length()+2));
       EEPROM.put(STARTING_ADDR, data);
       EEPROM.commit();
 
-      // Write Password from RaspberryPi network on flash
+      // Write Password from network on flash
       eeprom_address = STARTING_ADDR + sizeof(eeprom_data);
       pass_string.concat('\0');
       pass_string.toCharArray(data.str, (pass_string.length()+2));
@@ -208,7 +208,7 @@ void disconnect_AP_mode()
 }
 
 /*
-Connects to the RaspberyPi wifi network.
+Connects to the wifi network.
 */
 void connect_to_wifi_network()
 {
@@ -279,7 +279,7 @@ uint8 check_sum(char *value, int len)
 }
 
 /*
-Parse UDP package received by RaspberryPi.
+Parse UDP package received.
 */
 void parse_packet(int package_len)
 {
