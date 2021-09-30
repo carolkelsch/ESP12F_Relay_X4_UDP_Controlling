@@ -1,5 +1,5 @@
 # ESP12F_Relay_X4_UDP_Controlling
-This project provides a code for ESP12F_Relay_X4 board. It enables the relays to be controlled by UDP commands.
+This project provides a code for ESP12F_Relay_X4 board (https://templates.blakadder.com/ESP12F_Relay_X4.html). It enables the relays to be controlled by UDP commands.
 
 The ESP will connect to a WiFi network, wich can be configured by accessing the ESP when it's in Access Point mode. After connected to the WLAN, the ESP can receive UDP packages with commands to controll the relays and read digital inputs states.
 
@@ -91,6 +91,16 @@ You may need to install the driver for your serial-USB conversor, please check w
 
 To flash the ESP8266, first you need to select the board in the IDE, to do this go to **Tools -> Board -> ESP8266 Boards** and select the **ESPino (ESP-12 Module)**.
 Then you can flash the board, just remind that the ESP8266 needs to be in boot mode for this. In order to put the ESP in boot mode, you should conect the GPIO 0 to the GND and reset the board by pressing the reset buttom or disconecting and connection the power. After flashing the code, just disconect the GPIO 0 from the GND, and reset again. The board should run the code. :)
+
+To flash, make these connections between the serial-USB conversor and the board:
+
+| Serial-USB conversor | ESP12F_Relay_X4 board |
+| --------- | --------- |
+|  TX  |  RX  |
+|  RX  |  TX  |
+|  GND  |  GND  |
+
+**PS:** if you are using the serial-USB conversor to power the board, then connect the +5V of the conversor in the +5V from the board. If you are using another source to power the board, leave the +5V of the conversor open.
 
 # Making the board connections
 
