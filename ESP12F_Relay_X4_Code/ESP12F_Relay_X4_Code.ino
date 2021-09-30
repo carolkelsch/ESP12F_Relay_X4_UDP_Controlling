@@ -1,8 +1,9 @@
-#include <ESP8266WiFi.h>
-#include <EEPROM.h>
+//#include <ESP8266WiFi.h>
+//#include <EEPROM.h>
 #include <WiFiUdp.h>
-#include <ESPAsyncTCP.h>
-#include <ESPAsyncWebServer.h>
+//#include <ESPAsyncTCP.h>
+//#include <ESPAsyncWebServer.h>
+#include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
 
 /************************* Defines *************************/
 
@@ -56,18 +57,8 @@ struct components_s{
 };
 components_s components[7];
 
-// WiFi default credentials
-char WIFI_SSID[255] = "DESKTOP-3DJR285";
-char WIFI_PASS[255] = "4y1Y1178";
+// UDP server port
 int UDP_PORT = 4210;
-
-// Access point configurations
-IPAddress local_IP(192,168,4,22);
-IPAddress gateway(192,168,4,9);
-IPAddress subnet(255,255,255,0);
-
-// EEPROM address management
-int eeprom_address = STARTING_ADDR;
 
 // State of network connection
 enum WiFi_connection_state{
@@ -79,34 +70,6 @@ enum WiFi_connection_state{
 
 WiFi_connection_state connection_state = CONFIGURING;
 
-// EEPROM data structure
-struct eeprom_data{ 
-  uint val = 0;
-  char str[35] = "";
-} data;
-
-// AsyncWebServer on port 80 for wifi network configuring
-AsyncWebServer server(80);
-
-// WebServer inputs
-char* PARAM_INPUT_1 = "imputPORT";
-char* PARAM_INPUT_2 = "inputSSID";
-char* PARAM_INPUT_3 = "inputPASS";
-
-// WebServer simple page
-const char index_html[] PROGMEM = R"rawliteral(
-<!DOCTYPE HTML><html><head>
-  <title>ESP WiFi Config Form</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  </head><body>
-  <form action="/configWifi" method="get">
-    PORT: <input type="number" name="imputPORT" value="4210"><br>
-    SSID: <input type="text" name="inputSSID" value="MySSID"><br>
-    PASS: <input type="password" name="inputPASS"><br>
-    <input type="submit" value="Submit">
-  </form>
-</body></html>)rawliteral";
-
 // UDP variables
 WiFiUDP UDP;
 char packet[255];
@@ -116,118 +79,13 @@ int reply_len = 0;
 /************************* Custom Functions *************************/
 
 /*
-Send error message to WebServer.
+Configured UDP server.
 */
-void notFound(AsyncWebServerRequest *request) {
-  request->send(404, "text/plain", "Not found");
-}
-
-/*
-Configure WiFi as access point and configure a little webpage to get configurations
-from new WiFi network.
-*/
-void configure_wifi_network()
+void configure_UDP_server()
 {
-  Serial.print("Setting soft-AP configuration ... ");
-  Serial.println(WiFi.softAPConfig(local_IP, gateway, subnet) ? "Ready" : "Failed!");
-
-  Serial.print("Setting soft-AP ... ");
-  Serial.println(WiFi.softAP("ESP-Net") ? "Ready" : "Failed!");
-
-  Serial.print("Soft-AP IP address = ");
-  Serial.println(WiFi.softAPIP());
-  
-  Serial.println();
-  
-  // Send web page with input fields to client
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send_P(200, "text/html", index_html);
-  });
-
-  // Send a GET request to input parameters
-  server.on("/configWifi", HTTP_GET, [] (AsyncWebServerRequest *request) {
-    String inputParam;
-    String ssid_string;
-    String pass_string;
-    String inputMessage;
-    String port_number;
-    // GET input 1, 2 and 3 values
-    if (request->hasParam(PARAM_INPUT_2) && request->hasParam(PARAM_INPUT_3) && request->hasParam(PARAM_INPUT_1)) {
-      ssid_string = request->getParam(PARAM_INPUT_2)->value();
-      pass_string = request->getParam(PARAM_INPUT_3)->value();
-      port_number = request->getParam(PARAM_INPUT_1)->value();
-      inputParam = PARAM_INPUT_1;
-
-      // Write SSID from network on flash
-      ssid_string.concat('\0');
-      ssid_string.toCharArray(data.str, (ssid_string.length()+2));
-      ssid_string.toCharArray(WIFI_SSID, (ssid_string.length()+2));
-      EEPROM.put(STARTING_ADDR, data);
-      EEPROM.commit();
-
-      // Write Password from network on flash
-      eeprom_address = STARTING_ADDR + sizeof(eeprom_data);
-      pass_string.concat('\0');
-      pass_string.toCharArray(data.str, (pass_string.length()+2));
-      ssid_string.toCharArray(WIFI_PASS, (ssid_string.length()+2));
-      EEPROM.put(eeprom_address, data);
-      EEPROM.commit();
-
-      UDP_PORT = port_number.toInt();
-      // Write UDP port to flash
-      eeprom_address = eeprom_address + sizeof(eeprom_data);
-      data.val = UDP_PORT;
-      EEPROM.put(eeprom_address, data);
-      EEPROM.commit();
-
-      inputMessage = "ok, switch to working mode and reset the board";
-      connection_state = CONFIGURED;
-    }
-    else {
-      inputMessage = "Error, reset the board and try again";
-      inputParam = "none";
-    }
-    Serial.println(inputMessage);
-    // Send a resposnse
-    request->send(200, "text/html", "HTTP GET request status " 
-                                     + inputMessage +
-                                     "<br><a href=\"/\">Return to Home Page</a>");
-  });
-
-  server.onNotFound(notFound);
-  server.begin();
-}
-
-/*
-Disconnects from access point mode.
-*/
-void disconnect_AP_mode()
-{
-  WiFi.softAPdisconnect(true);
-  delay(500);
-}
-
-/*
-Connects to the wifi network.
-*/
-void connect_to_wifi_network()
-{
-  // Begin WiFi
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-    
-  // Connecting to WiFi...
-  Serial.print("Connecting to ");
-  Serial.print(WIFI_SSID);
-  // Loop continuously while WiFi is not connected
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(100);
-    Serial.print(".");
-  }
-  
   // Connected to WiFi
   Serial.println();
-  Serial.print("Connected! IP address: ");
+  Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
    
   // Begin listening to UDP port
@@ -466,62 +324,38 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
 
-  EEPROM.begin(512);
+  // Configure wifi network
+  WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
 
-  // Read from flash
-  EEPROM.get(STARTING_ADDR, data);
-
-  // Test if network SSID read from Flash is valid
-  if(data.str != INVALID_DATA){
-    Serial.println("Has Network SSID!");
-    strcpy(WIFI_SSID, data.str);
-    connection_state = CONFIGURED;
-  }else{
-    Serial.println("No valid Network SSID!");
-    connection_state = INVALID;
-  }
-  eeprom_address = STARTING_ADDR + sizeof(eeprom_data);
-  EEPROM.get(eeprom_address, data);
-
-  // Test if network Password read from Flash is valid
-  if(data.str != INVALID_DATA){
-    Serial.println("Has Network PASS!");
-    strcpy(WIFI_PASS, data.str);
-    connection_state = CONFIGURED;
-  }else{
-    Serial.println("No valid Network PASS!");
-    connection_state = INVALID;
-  }
-  
-  eeprom_address = eeprom_address + sizeof(eeprom_data);
-  EEPROM.get(eeprom_address, data);
-  
-  // Test if UDP port read from Flash is valid
-  if(data.val != 0){
-    Serial.println("Has UDP Port!");
-     UDP_PORT = data.val;
-    connection_state = CONFIGURED;
-  }else{
-    Serial.println("No valid UDP Port, setting to default 4210!");
-  }
+  // Uses WiFiManager library
+  WiFiManager wm;
 
   // If pin for wifi_conf is high, should enter access point mode
   // to configure new network
-  if(digitalRead(WIFI_CONF) == HIGH){
-    connection_state = CONFIGURING;
-    configure_wifi_network();
+  if(digitalRead(WIFI_CONF) == LOW){
+    // Reset settings - wipe stored credentials and configure again
+    wm.resetSettings();
   }
-  else if(connection_state == INVALID){ // If Flash values are invalid, should configure new network
-    connection_state = CONFIGURING;
-    configure_wifi_network();
+
+  // Automatically connect using saved credentials,
+  // If connection fails, it starts an access point with the specified name ( "EPS-NET")
+  bool res;
+  res = wm.autoConnect("EPS-NET","password"); // password protected ap
+
+  if(!res) {
+    Serial.println("Failed to connect");
+    ESP.restart();
+  } 
+  else {
+    //if you get here you are connected to the WiFi    
+    Serial.println("Connected!");
+    connection_state == CONFIGURED;
   }
-  else{ // If has a valid pre-configured network, connects to the network
-    connect_to_wifi_network();
-  }
+  configure_UDP_server();
 }
 
 void loop() {
-  // If it's already connected to the RaspberryPi network, wait for UPD packages
+  // If it's already connected to the network, wait for UPD packages
   if(connection_state == CONNECTED){
     int packetSize = UDP.parsePacket();
     
@@ -541,11 +375,5 @@ void loop() {
         Serial.print("Packet received, but check sum not ok!");
       }
     }
-  }
-  else if(connection_state == CONFIGURED){ // If it was configuring the new network, and now has valid parameters,
-    // change the access point mode to a sta mode
-    Serial.println("Turning off the access point.");
-    disconnect_AP_mode();
-    connect_to_wifi_network();
   }
 }
