@@ -72,3 +72,16 @@ The response to the multiple status request is:
 - **RS#**: relay status mask, if bit is set to 1 then relay is opened, if bit is set to 0 then relay is closed. The bit status for each relay respect the same position as the relay mask;
 - **SS#**: switch (or input) status mask, if bit is set to 1 then input is low (or opened), if bit is set to 0 then input is high (or closed). The bit status for each switch respect the same position as the switch mask;
 - **CS**: simple check sum, aquired by summing all the previous bytes os the message.
+
+# Drivers and stept to run the code:
+
+The ESP12F_Relay_X4 board uses a EP8266, in order to use it on Arduino IDE some extra packages need to be installed.
+- Install Arduino IDE (https://www.arduino.cc/en/software)
+- Add package for ESP8266:
+Open Arduino IDE, then go to **File -> Preferences** and add the URL "http://arduino.esp8266.com/stable/package_esp8266com_index.json" in the field Additional Boards Manager URLs.
+Go to **Tools -> Board -> Boards Manager** and search for **ESP8266**, install the latest version.
+- Install packages for WebServer and Access Point mode:
+Download the ESPAsyncWebServer (https://github.com/me-no-dev/ESPAsyncWebServer) and the ESPAsyncTCP (https://github.com/me-no-dev/ESPAsyncTCP) libraries in ZIP files. After this, go to **Sketch -> Include library -> Add .zip library** and select them in the file manager.
+
+**NOTE**
+You may need to install the driver for your serial-USB conversor, please check with the manufacturer.
