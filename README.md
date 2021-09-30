@@ -73,15 +73,45 @@ The response to the multiple status request is:
 - **SS#**: switch (or input) status mask, if bit is set to 1 then input is low (or opened), if bit is set to 0 then input is high (or closed). The bit status for each switch respect the same position as the switch mask;
 - **CS**: simple check sum, aquired by summing all the previous bytes os the message.
 
-# Drivers and stept to run the code:
+# Configuring Arduino IDE, installing drivers and packages
 
 The ESP12F_Relay_X4 board uses a EP8266, in order to use it on Arduino IDE some extra packages need to be installed.
 - Install Arduino IDE (https://www.arduino.cc/en/software)
 - Add package for ESP8266:
-Open Arduino IDE, then go to **File -> Preferences** and add the URL "http://arduino.esp8266.com/stable/package_esp8266com_index.json" in the field Additional Boards Manager URLs.
-Go to **Tools -> Board -> Boards Manager** and search for **ESP8266**, install the latest version.
+
+Open Arduino IDE, then go to **File -> Preferences** and add the URL "http://arduino.esp8266.com/stable/package_esp8266com_index.json" in the field **Additional Boards Manager URLs**. Go to **Tools -> Board -> Boards Manager** and search for **ESP8266**, install the latest version.
 - Install packages for WebServer and Access Point mode:
+
 Download the ESPAsyncWebServer (https://github.com/me-no-dev/ESPAsyncWebServer) and the ESPAsyncTCP (https://github.com/me-no-dev/ESPAsyncTCP) libraries in ZIP files. After this, go to **Sketch -> Include library -> Add .zip library** and select them in the file manager.
 
 **NOTE**
 You may need to install the driver for your serial-USB conversor, please check with the manufacturer.
+
+# Steps to run the code
+
+To flash the ESP8266, first you need to select the board in the IDE, to do this go to **Tools -> Board -> ESP8266 Boards** and select the **ESPino (ESP-12 Module)**.
+Then you can flash the board, just remind that the ESP8266 needs to be in boot mode for this. In order to put the ESP in boot mode, you should conect the GPIO 0 to the GND and reset the board by pressing the reset buttom or disconecting and connection the power. After flashing the code, just disconect the GPIO 0 from the GND, and reset again. The board should run the code. :)
+
+# Making the board connections
+
+The ESP12F_Relay_X4 has no previous connections with the mounted relays, so you can configure wich pin will be connected to each relay. In this code the following connections are used:
+| Pin | Function |
+| --------- | --------- |
+|  GPIO 15  |  Output / Relay 1  |
+|  GPIO 14  |  Output / Relay 2  |
+|  GPIO 12  |  Output / Relay 3  |
+|  GPIO 13  |  Output / Relay 4  |
+|  GPIO 05  |  Input / Functional mode  |
+|  GPIO 04  |  Input / Top end switch  |
+|  GPIO 0x  |  Input / Bottom end switch  |
+|  GPIO 16  |  Input / WiFi conf. mode  |
+
+# Configuring the WiFi network
+
+The program runs as a UDP server connected to a WLAN. To configure the WLAN in wich the ESP should be connected, it's necessary to start the program in Access Point mode. 
+Connect the GPIO 16 to HIGH level, and power the board (or reset), this will make ESP ins AP mode. It creates its own WLAN named ESP-Net, no password needed.
+
+Connect to this WLAN with your smartphone or notebook and access the IP 192.168.4.22 through the web browser. A page will appear, where you can configure the SSID and the Password from the net you will connect your board. You can also choose a port for the UDP server. Submit the informations and whait for the response message. If it's ok, then disconect the GPIO 16 from the HIGH level, and reset the board.
+
+Your UDP server should be up, able to change relays status and respond you with informations about the inputs.
+
