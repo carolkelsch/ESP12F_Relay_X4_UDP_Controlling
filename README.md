@@ -80,12 +80,13 @@ The ESP12F_Relay_X4 board uses a EP8266, in order to use it on Arduino IDE some 
 - Add package for ESP8266:
 
 Open Arduino IDE, then go to **File -> Preferences** and add the URL "http://arduino.esp8266.com/stable/package_esp8266com_index.json" in the field **Additional Boards Manager URLs**. Go to **Tools -> Board -> Boards Manager** and search for **ESP8266**, install the latest version.
-- Install packages for WebServer and Access Point mode:
+- Install package for WiFi configuring:
 
-Download the ESPAsyncWebServer (https://github.com/me-no-dev/ESPAsyncWebServer) and the ESPAsyncTCP (https://github.com/me-no-dev/ESPAsyncTCP) libraries in ZIP files. After this, go to **Sketch -> Include library -> Add .zip library** and select them in the file manager.
+Download the WiFiManager library (https://github.com/tzapu/WiFiManagerESPAsyncWebServer)) in ZIP file. After this, go to **Sketch -> Include library -> Add .zip library** and select it in the file manager.
 
 **NOTE**
 You may need to install the driver for your serial-USB conversor, please check with the manufacturer.
+If you are using a FTDI chip, like FT232RT, you can download and install this driver (https://oemdrivers.com/usb-ft232r-usb-uart-driver).
 
 # Steps to run the code
 
@@ -118,10 +119,13 @@ The ESP12F_Relay_X4 has no previous connections with the mounted relays, so you 
 
 # Configuring the WiFi network
 
-The program runs as a UDP server connected to a WLAN. To configure the WLAN in wich the ESP should be connected, it's necessary to start the program in Access Point mode. 
-Connect the GPIO 16 to HIGH level, and power the board (or reset), this will make ESP ins AP mode. It creates its own WLAN named ESP-Net, no password needed.
+The program runs as a UDP server connected to a WLAN. To configure the WLAN, in wich the ESP should be connected, the WiFiManager library from tzapu is used (https://github.com/tzapu/WiFiManager). 
+It configures the ESP as an access point with a WebServer page. In this page it's possible to scan for WLAN networks and configure it.
+Connect to "ESP-NET" WLAN with your smartphone or notebook and access the IP 192.168.4.1 through the web browser. A page will appear, where you can configure the SSID and the Password from the net you will connect your board.
 
-Connect to this WLAN with your smartphone or notebook and access the IP 192.168.4.22 through the web browser. A page will appear, where you can configure the SSID and the Password from the net you will connect your board. You can also choose a port for the UDP server. Submit the informations and whait for the response message. If it's ok, then disconect the GPIO 16 from the HIGH level, and reset the board.
+Once you set the WLAN and password, the ESP saves the informations and connects automatically to the network.
+Everytime the board is energized it will try to connect to it's previous network configured. If for some reason it's not able to connect, it will launch the access point mode again.
+If you want to change the network, you can connect the GPIO 16 to GND, and power the board (or reset), this will erase the previous configuration of network connection. After this disconnect the pin from GND.
 
-Your UDP server should be up, able to change relays status and respond you with informations about the inputs.
+After you configured the network the ESP will connect to the WLAN and the UDP server should be up. Enabling you to change relays status and respond you with informations about the inputs.
 
