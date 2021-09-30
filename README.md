@@ -17,8 +17,8 @@ The ESP will connect to a WiFi network, wich can be configured by accessing the 
 |  0A R# C# CS |  Open or close multiple relays |
 
 The last command can change the state of multiple relays, the structure of the command is:
-- 0A: identificator byte;
-- R#: relays mask byte, if bit is set to 1, then the command will be applied to the relay;
+- **0A**: identificator byte;
+- **R#**: relays mask byte, if bit is set to 1, then the command will be applied to the relay;
 
 
 | Bit 7 | Bit 6 | Bit 5 | Bit 4 | Bit 3 | Bit 2 | Bit 1 | Bit 0 |
@@ -31,7 +31,7 @@ The last command can change the state of multiple relays, the structure of the c
 | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
 | - | - | - | - | 1 (Open) / 0 (Close) | 1 (Open) / 0 (Close) | 1 (Open) / 0 (Close) | 1 (Open) / 0 (Close) |
 
-- CS: simple check sum, aquired by summing all the previous bytes os the message.
+- **CS**: simple check sum, aquired by summing all the previous bytes os the message.
 
 The response for the setting commands are the first 3 bytes of the command, plus a 0x06 byte (ACK) and the new CheckSum.
 
