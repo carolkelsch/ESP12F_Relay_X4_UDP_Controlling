@@ -334,7 +334,6 @@ Function that reconnect to the WiFi after disconnection.
 void wifi_reconnect()
 {
   disable_outputs();
-  // TODO: check why is reseting
   WiFi.disconnect();
   delay(10);
   // Begin WiFi
@@ -415,6 +414,7 @@ void setup() {
     bool res;
     
     wm.setBreakAfterConfig(true);
+    
     res = wm.autoConnect("EPS-NET", "password");
   
     if(!res) {
