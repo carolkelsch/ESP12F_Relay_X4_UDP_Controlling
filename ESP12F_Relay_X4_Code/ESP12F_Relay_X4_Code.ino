@@ -71,6 +71,9 @@ WiFi_connection_state connection_state = CONFIGURING;
 // WiFi default credentials
 char WIFI_SSID[255] = "AAA";
 char WIFI_PASS[255] = "AAA";
+char static_ip[16] = "10.0.1.56";
+char static_gw[16] = "10.0.1.1";
+char static_sn[16] = "255.255.255.0";
 
 // UDP variables
 WiFiUDP UDP;
@@ -414,6 +417,14 @@ void setup() {
     bool res;
     
     wm.setBreakAfterConfig(true);
+
+    //set static ip
+    IPAddress _ip, _gw, _sn;
+    _ip.fromString(static_ip);
+    _gw.fromString(static_gw);
+    _sn.fromString(static_sn);
+  
+    wm.setSTAStaticIPConfig(_ip, _gw, _sn);
     
     res = wm.autoConnect("EPS-NET", "password");
   
@@ -430,6 +441,14 @@ void setup() {
       // Store new WiFi SSID and password in case of disconnection
       saved_SSID.toCharArray(WIFI_SSID, saved_SSID.length()+1);
       saved_PASS.toCharArray(WIFI_PASS, saved_PASS.length()+1);
+
+      // TODO: save static IP config
+      Serial.print("WiFi IP");
+      Serial.println(WiFi.localIP());
+      Serial.print("WiFi Gateway");
+      Serial.println(WiFi.gatewayIP());
+      Serial.print("WiFi Subnet Mask");
+      Serial.println(WiFi.subnetMask());
       
       connection_state == CONNECTED;
     }
