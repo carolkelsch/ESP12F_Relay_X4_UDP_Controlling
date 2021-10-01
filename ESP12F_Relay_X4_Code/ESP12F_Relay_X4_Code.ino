@@ -1,8 +1,4 @@
-//#include <ESP8266WiFi.h>
-//#include <EEPROM.h>
 #include <WiFiUdp.h>
-//#include <ESPAsyncTCP.h>
-//#include <ESPAsyncWebServer.h>
 #include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
 
 /************************* Defines *************************/
@@ -22,7 +18,7 @@
 #define WIFI_CONF 16
 
 // Invalid data from flash
-#define INVALID_DATA "AAA"
+#define INVALID_DATA ""
 
 // EEPROM reference address
 #define STARTING_ADDR 1
@@ -66,9 +62,15 @@ enum WiFi_connection_state{
   CONFIGURED,
   INVALID,
   CONNECTED,
+  RUNNING,
+  DISCONNECTED,
 };
 
 WiFi_connection_state connection_state = CONFIGURING;
+
+// WiFi default credentials
+char WIFI_SSID[255] = "AAA";
+char WIFI_PASS[255] = "AAA";
 
 // UDP variables
 WiFiUDP UDP;
@@ -94,7 +96,7 @@ void configure_UDP_server()
   Serial.println(UDP_PORT);
 
   // Update the connection status
-  connection_state = CONNECTED;
+  connection_state = RUNNING;
 }
 
 /*
@@ -283,6 +285,67 @@ void parse_packet(int package_len)
   }
 }
 
+/*
+Connects to the wifi network.
+*/
+void connect_to_wifi_network()
+{
+  // Begin WiFi
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+    
+  // Connecting to WiFi...
+  Serial.print("Connecting to ");
+  Serial.print(WIFI_SSID);
+  // Loop continuously while WiFi is not connected
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(100);
+    Serial.print(".");
+  }
+  
+  // Connected to WiFi
+  Serial.println();
+  Serial.print("Connected! IP address: ");
+  Serial.println(WiFi.localIP());
+  
+  // Update the connection status
+  connection_state = CONNECTED;
+}
+
+/*
+Disable all outputs for safety reason, in case the connection is lost.
+*/
+void disable_outputs()
+{
+  digitalWrite(RELAY_1, LOW);
+  components[0].value = OPEN;
+  digitalWrite(RELAY_2, LOW);
+  components[1].value = OPEN;
+  digitalWrite(RELAY_3, LOW);
+  components[2].value = OPEN;
+  digitalWrite(RELAY_4, LOW);
+  components[3].value = OPEN;
+}
+
+/*
+Function that reconnect to the WiFi after disconnection.
+*/
+
+void wifi_reconnect()
+{
+  disable_outputs();
+  // TODO: check why is reseting
+  WiFi.disconnect();
+  delay(10);
+  // Begin WiFi
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+    
+  // Connecting to WiFi...
+  Serial.print("Connecting to ");
+  Serial.print(WIFI_SSID);
+  Serial.print(".");
+}
+
 void setup() {
   // Configure the components of the system as relays and switches
   components[0].pin = RELAY_1;
@@ -305,14 +368,7 @@ void setup() {
 //  pinMode(BOTTOM_SWITCH_PIN, INPUT);
 
   // Set starting values for each pin and update the last setted values
-  digitalWrite(RELAY_1, LOW);
-  components[0].value = OPEN;
-  digitalWrite(RELAY_2, LOW);
-  components[1].value = OPEN;
-  digitalWrite(RELAY_3, LOW);
-  components[2].value = OPEN;
-  digitalWrite(RELAY_4, LOW);
-  components[3].value = OPEN;
+  disable_outputs();
   digitalWrite(ACTIVE, HIGH);
 
   // Store initial status for switches
@@ -326,7 +382,7 @@ void setup() {
 
   // Configure wifi network
   WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
-
+  
   // Uses WiFiManager library
   WiFiManager wm;
 
@@ -336,44 +392,95 @@ void setup() {
     // Reset settings - wipe stored credentials and configure again
     wm.resetSettings();
   }
+  else{
+    // Try to get previous data from flash, if the data is valid, then connect to WiFi
+    String saved_SSID = wm.getWiFiSSID();
+    String saved_PASS = wm.getWiFiPass();
+    if(saved_SSID != INVALID_DATA){
+      saved_SSID.toCharArray(WIFI_SSID, saved_SSID.length()+1);
+    
+      if(saved_PASS != INVALID_DATA){
+        saved_PASS.toCharArray(WIFI_PASS, saved_PASS.length()+1);
 
-  // Automatically connect using saved credentials,
-  // If connection fails, it starts an access point with the specified name ( "EPS-NET")
-  bool res;
-  res = wm.autoConnect("EPS-NET","password"); // password protected ap
-
-  if(!res) {
-    Serial.println("Failed to connect");
-    ESP.restart();
-  } 
-  else {
-    //if you get here you are connected to the WiFi    
-    Serial.println("Connected!");
-    connection_state == CONFIGURED;
+        connection_state = CONFIGURED;
+      }
+    }
   }
+
+  // If previous data is ok, then connect to WiFi
+  if(connection_state == CONFIGURED){
+    connect_to_wifi_network();
+  }else{
+    // If not, it starts an access point with the specified name "ESP-NET" and "password" as password
+    bool res;
+    
+    wm.setBreakAfterConfig(true);
+    res = wm.autoConnect("EPS-NET", "password");
+  
+    if(!res) {
+      Serial.println("Failed to connect");
+      ESP.restart();
+    } 
+    else {
+      // If you get here you are connected to the WiFi    
+      Serial.println("Connected!");
+      String saved_SSID = wm.getWiFiSSID();
+      String saved_PASS = wm.getWiFiPass();
+
+      // Store new WiFi SSID and password in case of disconnection
+      saved_SSID.toCharArray(WIFI_SSID, saved_SSID.length()+1);
+      saved_PASS.toCharArray(WIFI_PASS, saved_PASS.length()+1);
+      
+      connection_state == CONNECTED;
+    }
+  }
+  
+  // Starts de UDP server
   configure_UDP_server();
 }
 
 void loop() {
-  // If it's already connected to the network, wait for UPD packages
-  if(connection_state == CONNECTED){
-    int packetSize = UDP.parsePacket();
-    
-    if (packetSize) {
-//      Serial.print("Received packet!");
-      int len = UDP.read(packet, 255);
-
-      if(check_sum(packet, len) == SUCCESS){
-//        Serial.print("Packet received, check sum is ok!");
-        parse_packet(len);
-
-        // Send response packet
-        UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
-        UDP.write(reply, reply_len);
-        UDP.endPacket();
-      }else{
-        Serial.print("Packet received, but check sum not ok!");
+  // If is connected on WiFi
+  while (WiFi.status() == WL_CONNECTED)
+  {
+    // If UDP server is UP, wait for UPD packages
+    if(connection_state == RUNNING){
+      int packetSize = UDP.parsePacket();
+      
+      if (packetSize) {
+        int len = UDP.read(packet, 255);
+  
+        if(check_sum(packet, len) == SUCCESS){
+          parse_packet(len);
+  
+          // Send response packet
+          UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
+          UDP.write(reply, reply_len);
+          UDP.endPacket();
+        }else{
+          Serial.print("Packet received, but check sum not ok!");
+        }
       }
     }
+    // If WIFI_CONF pin is low, then restart the ESP to erase previous configurations
+    if(digitalRead(WIFI_CONF) == LOW){
+      ESP.reset();  
+    }
+    // If came back from a disconnection, update the connection state and inform new IP
+    if(connection_state == DISCONNECTED){
+      connection_state = RUNNING;
+      Serial.println();
+      Serial.print("Connected! IP address: ");
+      Serial.println(WiFi.localIP());
+    }
+  }
+  // If just disconnected, update the connection state and start reconnection routine
+  if(connection_state != DISCONNECTED){
+    connection_state = DISCONNECTED;
+    wifi_reconnect();
+  }else{
+    // While has not reconnected print dots
+    delay(100);
+    Serial.print(".");
   }
 }
