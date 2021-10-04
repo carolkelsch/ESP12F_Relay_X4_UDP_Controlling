@@ -31,6 +31,7 @@ The last command can change the state of multiple relays, the structure of the c
 | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
 | - | - | - | - | 1 (Open) / 0 (Close) | 1 (Open) / 0 (Close) | 1 (Open) / 0 (Close) | 1 (Open) / 0 (Close) |
 
+- **ACK**: 0x06, acknowledge byte in ASCII;
 - **CS**: simple check sum, aquired by summing all the previous bytes os the message.
 
 The response for the setting commands are the first 3 bytes of the command, plus a 0x06 byte (ACK) and the new CheckSum.
@@ -71,6 +72,7 @@ The response to the multiple status request is:
 - **S#**: switch (or inputs) mask byte, if bit is set to 1, then the status of the respective switch will be returned;
 - **RS#**: relay status mask, if bit is set to 1 then relay is opened, if bit is set to 0 then relay is closed. The bit status for each relay respect the same position as the relay mask;
 - **SS#**: switch (or input) status mask, if bit is set to 1 then input is low (or opened), if bit is set to 0 then input is high (or closed). The bit status for each switch respect the same position as the switch mask;
+- **ACK**: 0x06, acknowledge byte in ASCII;
 - **CS**: simple check sum, aquired by summing all the previous bytes os the message.
 
 # Configuring Arduino IDE, installing drivers and packages
