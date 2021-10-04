@@ -1,6 +1,6 @@
 #include <WiFiUdp.h>
 #include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
-
+#include <EEPROM.h>
 /************************* Defines *************************/
 
 // Pins configuration
@@ -21,7 +21,7 @@
 #define INVALID_DATA ""
 
 // EEPROM reference address
-#define STARTING_ADDR 1
+#define STARTING_ADDR 0
 
 // Commands to comute the relays
 #define ACTUATE_SIMPLE    0xA0
@@ -45,6 +45,15 @@
 #define FAILURE          0x01
 
 /************************* Global Variables *************************/
+
+// EEPROM data structure
+struct eeprom_data{ 
+  uint val = 0;
+  char str[35] = "";
+} data;
+
+// EEPROM address management
+int eeprom_address = STARTING_ADDR;
 
 // Component status variables
 struct components_s{
@@ -71,8 +80,8 @@ WiFi_connection_state connection_state = CONFIGURING;
 // WiFi default credentials
 char WIFI_SSID[255] = "AAA";
 char WIFI_PASS[255] = "AAA";
-char static_ip[16] = "10.0.1.56";
-char static_gw[16] = "10.0.1.1";
+char static_ip[16] = "192.168.137.20";
+char static_gw[16] = "192.168.137.1";
 char static_sn[16] = "255.255.255.0";
 
 // UDP variables
@@ -291,8 +300,13 @@ void parse_packet(int package_len)
 /*
 Connects to the wifi network.
 */
-void connect_to_wifi_network()
+void connect_to_wifi_network(IPAddress ip, IPAddress gateway, IPAddress submask)
 {
+  if((ip != IPAddress(0,0,0,0)) && (gateway != IPAddress(0,0,0,0)) && (submask != IPAddress(0,0,0,0))){
+    // Set static IP
+    WiFi.config(ip, gateway, submask);
+  }
+  // TODO: test if IP is valid
   // Begin WiFi
   WiFi.begin(WIFI_SSID, WIFI_PASS);
     
@@ -387,6 +401,7 @@ void setup() {
   
   // Uses WiFiManager library
   WiFiManager wm;
+  EEPROM.begin(512);
 
   // If pin for wifi_conf is high, should enter access point mode
   // to configure new network
@@ -411,7 +426,32 @@ void setup() {
 
   // If previous data is ok, then connect to WiFi
   if(connection_state == CONFIGURED){
-    connect_to_wifi_network();
+
+    IPAddress IP(0,0,0,0);
+    IPAddress gw(0,0,0,0);
+    IPAddress sm(0,0,0,0);
+
+    // Read static IP from flash
+    EEPROM.get(STARTING_ADDR, data);
+    IP.fromString(data.str);
+    Serial.print("WiFi IP ");
+    Serial.print(IP);
+
+    // Write gateway on flash
+    eeprom_address = STARTING_ADDR + sizeof(eeprom_data);
+    EEPROM.get(eeprom_address, data);
+    gw.fromString(data.str);
+    Serial.print("WiFi gateway ");
+    Serial.print(gw);
+
+    // Write subnet mask on flash
+    eeprom_address = eeprom_address + sizeof(eeprom_data);
+    EEPROM.get(eeprom_address, data);
+    sm.fromString(data.str);
+    Serial.print("WiFi Subnet Mask ");
+    Serial.print(sm);
+      
+    connect_to_wifi_network(IP, gw, sm);
   }else{
     // If not, it starts an access point with the specified name "ESP-NET" and "password" as password
     bool res;
@@ -437,18 +477,48 @@ void setup() {
       Serial.println("Connected!");
       String saved_SSID = wm.getWiFiSSID();
       String saved_PASS = wm.getWiFiPass();
+      String IP_config;
 
       // Store new WiFi SSID and password in case of disconnection
       saved_SSID.toCharArray(WIFI_SSID, saved_SSID.length()+1);
       saved_PASS.toCharArray(WIFI_PASS, saved_PASS.length()+1);
 
       // TODO: save static IP config
-      Serial.print("WiFi IP");
-      Serial.println(WiFi.localIP());
-      Serial.print("WiFi Gateway");
-      Serial.println(WiFi.gatewayIP());
-      Serial.print("WiFi Subnet Mask");
-      Serial.println(WiFi.subnetMask());
+
+      // Write static IP on flash
+      IP_config = WiFi.localIP().toString();
+      IP_config.concat('\0');
+      IP_config.toCharArray(data.str, IP_config.length());
+      Serial.print("WiFi IP ");
+      Serial.print(IP_config);
+      Serial.print(" IP length ");
+      Serial.println(IP_config.length());
+      EEPROM.put(STARTING_ADDR, data);
+      EEPROM.commit();
+
+      // Write gateway on flash
+      eeprom_address = STARTING_ADDR + sizeof(eeprom_data);
+      IP_config = WiFi.gatewayIP().toString();
+      IP_config.concat('\0');
+      IP_config.toCharArray(data.str, IP_config.length());
+      Serial.print("WiFi Gateway ");
+      Serial.print(IP_config);
+      Serial.print(" Gateway length ");
+      Serial.println(IP_config.length());
+      EEPROM.put(eeprom_address, data);
+      EEPROM.commit();
+
+      // Write subnet mask on flash
+      eeprom_address = eeprom_address + sizeof(eeprom_data);
+      IP_config = WiFi.subnetMask().toString();
+      IP_config.concat('\0');
+      IP_config.toCharArray(data.str, IP_config.length());
+      Serial.print("WiFi Subnet Mask ");
+      Serial.print(IP_config);
+      Serial.print(" Subnet Mask length ");
+      Serial.println(IP_config.length());
+      EEPROM.put(eeprom_address, data);
+      EEPROM.commit();
       
       connection_state == CONNECTED;
     }
