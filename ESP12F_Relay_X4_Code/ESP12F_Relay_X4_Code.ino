@@ -33,6 +33,12 @@
 #define SIMPLE_REQUEST    0xB0
 #define MULTIPLE_REQUEST  0x0B
 
+#define STOP    0x00
+#define GO_DOWN 0x01
+#define GO_UP   0x02
+
+#define ACK     0x06
+
 #define RELAY1           0x01
 #define RELAY2           0x02
 #define RELAY3           0x03
@@ -64,6 +70,15 @@ components_s components[7];
 
 // UDP server port
 int UDP_PORT = 4210;
+
+// State of network connection
+enum test_stand_moving_state{
+  STOPPED = 0,
+  GOING_UP,
+  GOING_DOWN,
+};
+
+test_stand_moving_state moving_state = STOPPED;
 
 // State of network connection
 enum WiFi_connection_state{
@@ -153,7 +168,7 @@ uint8 check_sum(char *value, int len)
 /*
 Parse UDP package received.
 */
-void parse_packet(int package_len)
+/*void parse_packet(int package_len)
 {
   int ind = 0;
   int packet_count = 0;
@@ -178,7 +193,7 @@ void parse_packet(int package_len)
           reply[0] = packet[0];
           reply[1] = ind + 1;
           reply[2] = packet[2];
-          reply[3] = 0x06;
+          reply[3] = ACK;
           reply[4] = reply[0] +  reply[1] +  reply[2] +  reply[3];
           reply_len = 5;
           break;
@@ -203,7 +218,7 @@ void parse_packet(int package_len)
       reply[0] = packet[0];
       reply[1] = (packet[1] & 0x0F);
       reply[2] = (packet[2] & 0x0F);
-      reply[3] = 0x06;
+      reply[3] = ACK;
       reply[4] = reply[0] +  reply[1] +  reply[2] +  reply[3];
       reply_len = 5;
     }
@@ -229,7 +244,7 @@ void parse_packet(int package_len)
         reply[4] = (reply[4] | (components[ind+4].value << ind));
       }
       
-      reply[5] = 0x06; // ACK
+      reply[5] = ACK; // ACK
       reply[6] = reply[0] + reply[1] + reply[2] + reply[3] + reply[4] + reply[5]; // Simple CS
       reply_len = 7;
     }
@@ -295,6 +310,84 @@ void parse_packet(int package_len)
       }
     }
   }
+}*/
+
+void parse_packet(int package_len)
+{
+  int ind = 0;
+  int packet_count = 0;
+  int comp = 0;
+
+  if(package_len == 4)
+  {
+    comp = packet[0] + 0;
+    if(comp == MULTIPLE_REQUEST){ // Request for multiple status on relays and switches
+      reply[0] = packet[0];
+      reply[1] = (packet[1] & 0x0F);
+      reply[2] = (packet[2] & 0x07);
+
+      // Get relays status
+      reply[3] = 0;
+      comp = packet[1] + 0;
+      
+      for(ind = 0; ind < 4; ind++)
+      {
+        reply[3] = (reply[3] | (components[ind].value << ind));
+      }
+      
+      // Get switches status
+      reply[4] = 0;
+      comp = packet[2] + 0;
+      for(ind = 0; ind < 3; ind++)
+      {
+        reply[4] = (reply[4] | (components[ind+4].value << ind));
+      }
+      
+      reply[5] = ACK; // ACK
+      reply[6] = reply[0] + reply[1] + reply[2] + reply[3] + reply[4] + reply[5]; // Simple CS
+      reply_len = 7;
+    }
+  }
+  else if(package_len == 3)
+  {
+    comp = packet[0] + 0;
+    if(comp == SIMPLE_REQUEST){ // Connection status request
+      reply[0] = packet[0];
+      reply[1] = 0x00;
+      reply[2] = ACK;
+      reply[3] = reply[0] +  reply[1] +  reply[2];
+      reply_len = 4;
+    }
+    else if(comp == ACTUATE_SIMPLE){ // Command to change relays status
+      comp = packet[1] + 0;
+      switch(comp){
+        case STOP: // Stop motor
+        disable_outputs();
+        reply[0] = packet[0];
+        reply[1] = STOP;
+        reply[2] = ACK;
+        reply[3] = reply[0] +  reply[1] +  reply[2];
+        reply_len = 4;
+        break;
+        case GO_DOWN: // Move stand down
+        go_down();
+        reply[0] = packet[0];
+        reply[1] = GO_DOWN;
+        reply[2] = ACK;
+        reply[3] = reply[0] +  reply[1] +  reply[2];
+        reply_len = 4;
+        break;
+        case GO_UP: // Move stand up
+        go_up();
+        reply[0] = packet[0];
+        reply[1] = GO_UP;
+        reply[2] = ACK;
+        reply[3] = reply[0] +  reply[1] +  reply[2];
+        reply_len = 4;
+        break;
+      }
+    }
+  }
 }
 
 /*
@@ -330,6 +423,30 @@ void connect_to_wifi_network(IPAddress ip, IPAddress gateway, IPAddress submask)
 }
 
 /*
+Switch relays to go up.
+*/
+void go_up()
+{
+  disable_outputs();
+  delay(10);
+  digitalWrite(RELAY_4, HIGH);
+  components[3].value = CLOSE;
+  moving_state = GOING_UP;
+}
+
+/*
+Switch relays to go down.
+*/
+void go_down()
+{
+  disable_outputs();
+  delay(10);
+  digitalWrite(RELAY_3, HIGH);
+  components[2].value = CLOSE;
+  moving_state = GOING_DOWN;
+}
+
+/*
 Disable all outputs for safety reason, in case the connection is lost.
 */
 void disable_outputs()
@@ -342,6 +459,7 @@ void disable_outputs()
   components[2].value = OPEN;
   digitalWrite(RELAY_4, LOW);
   components[3].value = OPEN;
+  moving_state = STOPPED;
 }
 
 /*
@@ -532,36 +650,73 @@ void loop() {
   // If is connected on WiFi
   while (WiFi.status() == WL_CONNECTED)
   {
-    // If UDP server is UP, wait for UPD packages
-    if(connection_state == RUNNING){
-      int packetSize = UDP.parsePacket();
-      
-      if (packetSize) {
-        int len = UDP.read(packet, 255);
-  
-        if(check_sum(packet, len) == SUCCESS){
-          parse_packet(len);
-  
-          // Send response packet
-          UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
-          UDP.write(reply, reply_len);
-          UDP.endPacket();
-        }else{
-          Serial.print("Packet received, but check sum not ok!");
+    // If is on auto mode
+    while(digitalRead(FUNC_MODE_PIN))
+    {
+      // If UDP server is UP, wait for UPD packages
+      if(connection_state == RUNNING){
+        int packetSize = UDP.parsePacket();
+        
+        if (packetSize) {
+          int len = UDP.read(packet, 255);
+    
+          if(check_sum(packet, len) == SUCCESS){
+            parse_packet(len);
+    
+            // Send response packet
+            UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
+            UDP.write(reply, reply_len);
+            UDP.endPacket();
+          }else{
+            Serial.print("Packet received, but check sum not ok!");
+          }
         }
       }
+      delay(10);
+      if(digitalRead(TOP_SWITCH_PIN) && (moving_state != STOPPED))
+      {
+        disable_outputs();
+        reply[0] = ACTUATE_SIMPLE;
+        reply[1] = STOP;
+        reply[2] = GO_UP;
+        reply[3] = ACK;
+        reply[4] = reply[0] + reply[1] + reply[2] + reply[3];
+        reply_len = 5;
+        
+        // Send response packet
+        UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
+        UDP.write(reply, reply_len);
+        UDP.endPacket();
+        
+      }
+      if(digitalRead(BOTTOM_SWITCH_PIN) && (moving_state != STOPPED))
+      {
+        disable_outputs();
+        reply[0] = ACTUATE_SIMPLE;
+        reply[1] = STOP;
+        reply[2] = GO_DOWN;
+        reply[3] = ACK;
+        reply[4] = reply[0] + reply[1] + reply[2] + reply[3];
+        reply_len = 5;
+        
+        // Send response packet
+        UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
+        UDP.write(reply, reply_len);
+        UDP.endPacket();
+      }
+      // If WIFI_CONF pin is low, then restart the ESP to erase previous configurations
+      if(digitalRead(WIFI_CONF) == LOW){
+        ESP.reset();  
+      }
+      // If came back from a disconnection, update the connection state and inform new IP
+      if(connection_state == DISCONNECTED){
+        connection_state = RUNNING;
+        Serial.println();
+        Serial.print("Connected! IP address: ");
+        Serial.println(WiFi.localIP());
+      }
     }
-    // If WIFI_CONF pin is low, then restart the ESP to erase previous configurations
-    if(digitalRead(WIFI_CONF) == LOW){
-      ESP.reset();  
-    }
-    // If came back from a disconnection, update the connection state and inform new IP
-    if(connection_state == DISCONNECTED){
-      connection_state = RUNNING;
-      Serial.println();
-      Serial.print("Connected! IP address: ");
-      Serial.println(WiFi.localIP());
-    }
+    disable_outputs();
   }
   // If just disconnected, update the connection state and start reconnection routine
   if(connection_state != DISCONNECTED){
