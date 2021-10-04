@@ -304,9 +304,9 @@ void connect_to_wifi_network(IPAddress ip, IPAddress gateway, IPAddress submask)
 {
   if((ip != IPAddress(0,0,0,0)) && (gateway != IPAddress(0,0,0,0)) && (submask != IPAddress(0,0,0,0))){
     // Set static IP
-    WiFi.config(ip, gateway, submask);
+    IPAddress dns(8,8,8,8);
+    WiFi.config(ip, dns, gateway, submask);
   }
-  // TODO: test if IP is valid
   // Begin WiFi
   WiFi.begin(WIFI_SSID, WIFI_PASS);
     
