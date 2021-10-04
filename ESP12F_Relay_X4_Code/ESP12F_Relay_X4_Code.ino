@@ -27,6 +27,12 @@
 #define ACTUATE_SIMPLE    0xA0
 #define ACTUATE_MULTIPLE  0x0A
 
+// Commands to change program settings
+#define PROGRAM_SETTINGS  0xC0
+#define SET_RELAYS_DELAY  0x00
+#define GENERIC_CODE      0x01
+#define OPTIMIZED_CODE    0x02
+
 #define OPEN              0x01
 #define CLOSE             0x00
 
@@ -71,7 +77,15 @@ components_s components[7];
 // UDP server port
 int UDP_PORT = 4210;
 
-// State of network connection
+// State of running code
+enum running_code_state{
+  GENERIC = 0,
+  OPTIMIZED,
+};
+
+running_code_state running_state = OPTIMIZED;
+
+// State of test stand
 enum test_stand_moving_state{
   STOPPED = 0,
   GOING_UP,
@@ -104,6 +118,9 @@ WiFiUDP UDP;
 char packet[255];
 char reply[20] = "Packet received!";
 int reply_len = 0;
+
+// Delay for changing relays states
+int time_delay = 1000;
 
 /************************* Custom Functions *************************/
 
@@ -168,7 +185,7 @@ uint8 check_sum(char *value, int len)
 /*
 Parse UDP package received.
 */
-/*void parse_packet(int package_len)
+void parse_packet_gen(int package_len)
 {
   int ind = 0;
   int packet_count = 0;
@@ -193,7 +210,7 @@ Parse UDP package received.
           reply[0] = packet[0];
           reply[1] = ind + 1;
           reply[2] = packet[2];
-          reply[3] = ACK;
+          reply[3] = 0x06;
           reply[4] = reply[0] +  reply[1] +  reply[2] +  reply[3];
           reply_len = 5;
           break;
@@ -218,7 +235,7 @@ Parse UDP package received.
       reply[0] = packet[0];
       reply[1] = (packet[1] & 0x0F);
       reply[2] = (packet[2] & 0x0F);
-      reply[3] = ACK;
+      reply[3] = 0x06;
       reply[4] = reply[0] +  reply[1] +  reply[2] +  reply[3];
       reply_len = 5;
     }
@@ -244,7 +261,7 @@ Parse UDP package received.
         reply[4] = (reply[4] | (components[ind+4].value << ind));
       }
       
-      reply[5] = ACK; // ACK
+      reply[5] = 0x06; // ACK
       reply[6] = reply[0] + reply[1] + reply[2] + reply[3] + reply[4] + reply[5]; // Simple CS
       reply_len = 7;
     }
@@ -310,9 +327,12 @@ Parse UDP package received.
       }
     }
   }
-}*/
+}
 
-void parse_packet(int package_len)
+/*
+Parse UDP package received.
+*/
+void parse_packet_opt(int package_len)
 {
   int ind = 0;
   int packet_count = 0;
@@ -343,9 +363,27 @@ void parse_packet(int package_len)
         reply[4] = (reply[4] | (components[ind+4].value << ind));
       }
       
-      reply[5] = ACK; // ACK
+      reply[5] = ACK;
       reply[6] = reply[0] + reply[1] + reply[2] + reply[3] + reply[4] + reply[5]; // Simple CS
       reply_len = 7;
+    }
+    else if(comp == PROGRAM_SETTINGS){
+      comp = packet[1] + 0;
+      if(comp == SET_RELAYS_DELAY){
+        int new_delay = (packet[2] << 0x08) | packet[3];
+        if(new_delay < 500){
+          new_delay = 500;
+        }
+        disable_outputs();
+        time_delay = new_delay;
+        
+        reply[0] = packet[0];
+        reply[1] = SET_RELAYS_DELAY;
+        reply[2] = packet[2];
+        reply[3] = packet[3];
+        reply[4] = ACK;
+        reply_len = 5;
+      }
     }
   }
   else if(package_len == 3)
@@ -387,6 +425,27 @@ void parse_packet(int package_len)
         break;
       }
     }
+//    else if(comp == PROGRAM_SETTINGS){
+//      comp = packet[1] + 0;
+//      switch(comp){
+//        case GENERIC_CODE: // Stop motor
+//        disable_outputs();
+//        reply[0] = packet[0];
+//        reply[1] = GENERIC_CODE;
+//        reply[2] = ACK;
+//        reply[3] = reply[0] +  reply[1] +  reply[2];
+//        reply_len = 4;
+//        break;
+//        case OPTIMIZED_CODE: // Move stand down
+//        disable_outputs();
+//        reply[0] = packet[0];
+//        reply[1] = OPTIMIZED_CODE;
+//        reply[2] = ACK;
+//        reply[3] = reply[0] +  reply[1] +  reply[2];
+//        reply_len = 4;
+//        break;
+//      }
+//    }
   }
 }
 
@@ -428,7 +487,6 @@ Switch relays to go up.
 void go_up()
 {
   disable_outputs();
-  delay(10);
   digitalWrite(RELAY_4, HIGH);
   components[3].value = CLOSE;
   moving_state = GOING_UP;
@@ -440,7 +498,6 @@ Switch relays to go down.
 void go_down()
 {
   disable_outputs();
-  delay(10);
   digitalWrite(RELAY_3, HIGH);
   components[2].value = CLOSE;
   moving_state = GOING_DOWN;
@@ -460,6 +517,7 @@ void disable_outputs()
   digitalWrite(RELAY_4, LOW);
   components[3].value = OPEN;
   moving_state = STOPPED;
+  delay(50);
 }
 
 /*
@@ -661,49 +719,56 @@ void loop() {
           int len = UDP.read(packet, 255);
     
           if(check_sum(packet, len) == SUCCESS){
-            parse_packet(len);
+            parse_packet_opt(len);
     
             // Send response packet
             UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
             UDP.write(reply, reply_len);
             UDP.endPacket();
+          }else if((len == 4) && (packet[0] == PROGRAM_SETTINGS) && (packet[1] == SET_RELAYS_DELAY)){
+              parse_packet_opt(len);
+
+              // Send response packet
+              UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
+              UDP.write(reply, reply_len);
+              UDP.endPacket();
           }else{
             Serial.print("Packet received, but check sum not ok!");
           }
         }
       }
-      delay(10);
-      if(digitalRead(TOP_SWITCH_PIN) && (moving_state != STOPPED))
-      {
-        disable_outputs();
-        reply[0] = ACTUATE_SIMPLE;
-        reply[1] = STOP;
-        reply[2] = GO_UP;
-        reply[3] = ACK;
-        reply[4] = reply[0] + reply[1] + reply[2] + reply[3];
-        reply_len = 5;
-        
-        // Send response packet
-        UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
-        UDP.write(reply, reply_len);
-        UDP.endPacket();
-        
-      }
-      if(digitalRead(BOTTOM_SWITCH_PIN) && (moving_state != STOPPED))
-      {
-        disable_outputs();
-        reply[0] = ACTUATE_SIMPLE;
-        reply[1] = STOP;
-        reply[2] = GO_DOWN;
-        reply[3] = ACK;
-        reply[4] = reply[0] + reply[1] + reply[2] + reply[3];
-        reply_len = 5;
-        
-        // Send response packet
-        UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
-        UDP.write(reply, reply_len);
-        UDP.endPacket();
-      }
+//      delay(time_delay);
+//      if(digitalRead(TOP_SWITCH_PIN) && (moving_state != STOPPED))
+//      {
+//        disable_outputs();
+//        reply[0] = ACTUATE_SIMPLE;
+//        reply[1] = STOP;
+//        reply[2] = GO_UP;
+//        reply[3] = ACK;
+//        reply[4] = reply[0] + reply[1] + reply[2] + reply[3];
+//        reply_len = 5;
+//        
+//        // Send response packet
+//        UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
+//        UDP.write(reply, reply_len);
+//        UDP.endPacket();
+//        
+//      }
+//      if(digitalRead(BOTTOM_SWITCH_PIN) && (moving_state != STOPPED))
+//      {
+//        disable_outputs();
+//        reply[0] = ACTUATE_SIMPLE;
+//        reply[1] = STOP;
+//        reply[2] = GO_DOWN;
+//        reply[3] = ACK;
+//        reply[4] = reply[0] + reply[1] + reply[2] + reply[3];
+//        reply_len = 5;
+//        
+//        // Send response packet
+//        UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
+//        UDP.write(reply, reply_len);
+//        UDP.endPacket();
+//      }
       // If WIFI_CONF pin is low, then restart the ESP to erase previous configurations
       if(digitalRead(WIFI_CONF) == LOW){
         ESP.reset();  
