@@ -124,7 +124,7 @@ void parse_packet(int package_len)
     comp = packet[0] + 0;
     if(comp == ACTUATE_SIMPLE) // Open or close command for only one relay
     {
-      if(running_state == GENERIC)
+      if(running_state == GENERIC) // Only work if it's in generic mode
       {
         for(ind = 0; ind < 4; ind++)
         {
@@ -148,14 +148,14 @@ void parse_packet(int package_len)
           }
         }
       }
-      else{
+      else{ // If it's not in generic mode, rensponse is NACK
         reply[0] = NACK;
         reply_len = 1;
       }
     }
     else if(comp == ACTUATE_MULTIPLE) // Open or close command for multiple relays
     {
-      if(running_state == GENERIC)
+      if(running_state == GENERIC) // Only works if it's in generic mode
       {
         for(ind = 0; ind < 4; ind++)
         {
@@ -178,7 +178,7 @@ void parse_packet(int package_len)
         reply[4] = reply[0] +  reply[1] +  reply[2] +  reply[3];
         reply_len = 5;
       }
-      else{
+      else{ // If it's not in generic mode, rensponse is NACK
         reply[0] = NACK;
         reply_len = 1;
       }
@@ -213,7 +213,7 @@ void parse_packet(int package_len)
     else if(comp == PROGRAM_SETTINGS)
     {
       comp = packet[1] + 0;
-      if(comp == SET_RELAYS_DELAY)
+      if(comp == SET_RELAYS_DELAY) // Configure a new fixed time for optimized mode
       {
         int new_delay = (packet[2] << 0x08) | packet[3];
         if(new_delay > 26000){ // 26 seconds is the maximum time for timer configuration
@@ -233,7 +233,7 @@ void parse_packet(int package_len)
         reply[4] = ACK;
         reply_len = 5;
       }
-      else if(comp == CHANGE_CODE)
+      else if(comp == CHANGE_CODE) // Change working mode
       {
         comp = packet[2] + 0;
         switch(comp){
@@ -259,9 +259,13 @@ void parse_packet(int package_len)
           reply[4] = reply[0] +  reply[1] +  reply[2] + reply[3];
           reply_len = 5;
           break;
+          default: // Not recognized mode
+          reply[0] = NACK;
+          reply_len = 1;
+          break;
         }
       }
-      else{
+      else{ // If the command was not recognized, send NACK
         reply[0] = NACK;
         reply_len = 1;
       }
@@ -270,9 +274,9 @@ void parse_packet(int package_len)
   else if(package_len == 3)
   {
     comp = packet[0] + 0;
-    if(comp == ACTUATE_SIMPLE)
+    if(comp == ACTUATE_SIMPLE) // Command to change relays status
     {
-      if(running_state == OPTIMIZED) // Command to change relays status
+      if(running_state == OPTIMIZED) // These only work in optimized mode
       {
         comp = packet[1] + 0;
         switch(comp){
@@ -286,26 +290,26 @@ void parse_packet(int package_len)
           break;
           case GO_DOWN: // Move stand down
           if(time_delay != 0){
-            if(ITimer.setInterval((long int)time_delay * 1000, TimerHandler) == true){
+            if(ITimer.setInterval((long int)time_delay * 1000, TimerHandler) == true){ // Configure timer to stop after specified time
               go_down();
               resp_status = 1;
             }
-            else{
+            else{ // If timer could not be configured, then send a NACK response
               resp_status = 0;
             }
           }
-          else{
+          else{ // If specified time is 0s, then go down until receive stop or up command
             go_down();
             resp_status = 1;
           }
-          if(resp_status != 0){
+          if(resp_status != 0){ // Send ACK response
             reply[0] = packet[0];
             reply[1] = GO_DOWN;
             reply[2] = ACK;
             reply[3] = reply[0] +  reply[1] +  reply[2];
             reply_len = 4;
           }
-          else{
+          else{ // Send NACK response
             reply[0] = packet[0];
             reply[1] = GO_DOWN;
             reply[2] = NACK;
@@ -315,26 +319,26 @@ void parse_packet(int package_len)
           break;
           case GO_UP: // Move stand up
           if(time_delay != 0){
-            if(ITimer.setInterval((long int)time_delay * 1000, TimerHandler) == true){
+            if(ITimer.setInterval((long int)time_delay * 1000, TimerHandler) == true){ // Configure timer to stop after specified time
               go_up();
               resp_status = 1;
             }
-            else{
+            else{ // If timer could not be configured, then send a NACK response
               resp_status = 0;
             }
           }
-          else{
+          else{ // If specified time is 0s, then go up until receive stop or down command
             go_up();
             resp_status = 1;
           }
-          if(resp_status != 0){
+          if(resp_status != 0){ // Send ACK response
             reply[0] = packet[0];
             reply[1] = GO_UP;
             reply[2] = ACK;
             reply[3] = reply[0] +  reply[1] +  reply[2];
             reply_len = 4;
           }
-          else{
+          else{ // Send NACK response
             reply[0] = packet[0];
             reply[1] = GO_UP;
             reply[2] = NACK;
@@ -342,13 +346,13 @@ void parse_packet(int package_len)
             reply_len = 4;
           }
           break;
-          default:
+          default: // If the command was not recognized, send NACK response
           reply[0] = NACK;
           reply_len = 1;
           break;
         }
       }
-      else{
+      else{ // If code is working in generic mode, send NACK response
         reply[0] = NACK;
         reply_len = 1;
       }
@@ -357,7 +361,7 @@ void parse_packet(int package_len)
     {
       comp = packet[1] + 0;
       switch(comp){
-        case CONNECTION:
+        case CONNECTION: // Connection status
         reply[0] = packet[0];
         reply[1] = CONNECTION;
         reply[2] = CONNECTION;
@@ -400,7 +404,6 @@ void parse_packet(int package_len)
         case FUNC_MODE: // Get functional mode status
         reply[0] = packet[0];
         reply[1] = FUNC_MODE;
-        components[4].value = (digitalRead(FUNC_MODE_PIN) ? CLOSE : OPEN);
         reply[2] = components[4].value;
         reply[3] = ACK;
         reply[4] = reply[0] +  reply[1] +  reply[2] + reply[3];
@@ -409,7 +412,6 @@ void parse_packet(int package_len)
         case TOP_SWITCH: // Get top end switch status
         reply[0] = packet[0];
         reply[1] = TOP_SWITCH;
-        components[5].value = (digitalRead(TOP_SWITCH_PIN) ? CLOSE : OPEN);
         reply[2] = components[5].value;
         reply[3] = ACK;
         reply[4] = reply[0] +  reply[1] +  reply[2] + reply[3];
@@ -418,20 +420,19 @@ void parse_packet(int package_len)
         case BOTTOM_SWITCH: // Get bottom end switch status
         reply[0] = packet[0];
         reply[1] = BOTTOM_SWITCH;
-        components[6].value = (digitalRead(BOTTOM_SWITCH_PIN) ? CLOSE : OPEN);
         reply[2] = components[6].value;
         reply[3] = ACK;
         reply[4] = reply[0] +  reply[1] +  reply[2] + reply[3];
         reply_len = 5;
         break;
-        default:
+        default: // If component was not recognized, send NACK
         reply[0] = NACK;
         reply_len = 1;
         break;
       }
     }
   }
-  else{
+  else{ // If invalid size of packet, send NACK
     reply[0] = NACK;
     reply_len = 1;
   }
@@ -726,6 +727,9 @@ void loop() {
     else{
       disable_outputs();
     }
+    components[4].value = (digitalRead(FUNC_MODE_PIN) ? CLOSE : OPEN);
+    components[5].value = (digitalRead(TOP_SWITCH_PIN) ? CLOSE : OPEN);
+    components[6].value = (digitalRead(BOTTOM_SWITCH_PIN) ? CLOSE : OPEN);
   }
   // If just disconnected, update the connection state and start reconnection routine
   if(connection_state != DISCONNECTED){
