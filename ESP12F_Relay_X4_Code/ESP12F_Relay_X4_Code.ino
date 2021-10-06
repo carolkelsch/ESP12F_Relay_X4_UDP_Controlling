@@ -1,146 +1,23 @@
 #include <WiFiUdp.h>
 #include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
 #include <EEPROM.h>
-/************************* Defines *************************/
-
-// Pins configuration
-#define RELAY_1 15
-#define RELAY_2 14
-#define RELAY_3 12
-#define RELAY_4 13
-
-// Pins for switchs
-#define FUNC_MODE_PIN     5
-#define TOP_SWITCH_PIN    4
-#define BOTTOM_SWITCH_PIN 4
-
-#define ACTIVE 2
-#define WIFI_CONF 16
-
-// Invalid data from flash
-#define INVALID_DATA ""
-
-// EEPROM reference address
-#define STARTING_ADDR 0
-
-// Commands to comute the relays
-#define ACTUATE_SIMPLE    0xA0
-#define ACTUATE_MULTIPLE  0x0A
-
-// Commands to change program settings
-#define PROGRAM_SETTINGS  0xC0
-#define SET_RELAYS_DELAY  0x00
-#define GENERIC_CODE      0x01
-#define OPTIMIZED_CODE    0x02
-
-#define OPEN              0x01
-#define CLOSE             0x00
-
-#define SIMPLE_REQUEST    0xB0
-#define MULTIPLE_REQUEST  0x0B
-
-#define STOP    0x00
-#define GO_DOWN 0x01
-#define GO_UP   0x02
-
-#define ACK     0x06
-
-#define RELAY1           0x01
-#define RELAY2           0x02
-#define RELAY3           0x03
-#define RELAY4           0x04
-#define FUNC_MODE        0x05
-#define TOP_SWITCH       0x06
-#define BOTTOM_SWITCH    0x07
-
-#define SUCCESS          0x00
-#define FAILURE          0x01
-
+#include "variables.h"
+#include "ESP8266TimerInterrupt.h"
 /************************* Global Variables *************************/
-
-// EEPROM data structure
-struct eeprom_data{ 
-  uint val = 0;
-  char str[35] = "";
-} data;
-
-// EEPROM address management
-int eeprom_address = STARTING_ADDR;
-
-// Component status variables
-struct components_s{
-  int pin;
-  int value;
-};
-components_s components[7];
-
-// UDP server port
-int UDP_PORT = 4210;
-
-// State of running code
-enum running_code_state{
-  GENERIC = 0,
-  OPTIMIZED,
-};
-
-running_code_state running_state = OPTIMIZED;
-
-// State of test stand
-enum test_stand_moving_state{
-  STOPPED = 0,
-  GOING_UP,
-  GOING_DOWN,
-};
-
-test_stand_moving_state moving_state = STOPPED;
-
-// State of network connection
-enum WiFi_connection_state{
-  CONFIGURING = 0,
-  CONFIGURED,
-  INVALID,
-  CONNECTED,
-  RUNNING,
-  DISCONNECTED,
-};
-
-WiFi_connection_state connection_state = CONFIGURING;
-
-// WiFi default credentials
-char WIFI_SSID[255] = "AAA";
-char WIFI_PASS[255] = "AAA";
-char static_ip[16] = "192.168.137.20";
-char static_gw[16] = "192.168.137.1";
-char static_sn[16] = "255.255.255.0";
-
-// UDP variables
+// UDP handler
 WiFiUDP UDP;
-char packet[255];
-char reply[20] = "Packet received!";
-int reply_len = 0;
 
-// Delay for changing relays states
-int time_delay = 1000;
-
+// Timer for fixed time operating mode
+ESP8266Timer ITimer;
 /************************* Custom Functions *************************/
 
 /*
-Configured UDP server.
+Timer callback for fixed time operating mode.
 */
-void configure_UDP_server()
+void IRAM_ATTR TimerHandler(void)
 {
-  // Connected to WiFi
-  Serial.println();
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-   
-  // Begin listening to UDP port
-  UDP.begin(UDP_PORT);
-  Serial.print("Listening on UDP port ");
-  Serial.println(UDP_PORT);
-
-  // Update the connection status
-  connection_state = RUNNING;
+  disable_outputs();
+  ITimer.disableTimer();
 }
 
 /*
@@ -156,6 +33,56 @@ void comute_relay(int relay_pin, int action)
   else if(action == CLOSE){
     digitalWrite(relay_pin, HIGH);
   }
+}
+
+/*
+Switch relays to go up.
+*/
+void go_up()
+{
+  if(moving_state == GOING_DOWN){
+    disable_outputs();
+    delay(1000);
+  }
+  // Relays 1 and 3 are closed
+  digitalWrite(RELAY_1, HIGH);
+  components[0].value = CLOSE;
+  digitalWrite(RELAY_3, HIGH);
+  components[2].value = CLOSE;
+  moving_state = GOING_UP;
+}
+
+/*
+Switch relays to go down.
+*/
+void go_down()
+{
+  if(moving_state == GOING_UP){
+    disable_outputs();
+    delay(1000);
+  }
+  // Relays 2 and 4 are closed
+  digitalWrite(RELAY_2, HIGH);
+  components[1].value = CLOSE;
+  digitalWrite(RELAY_4, HIGH);
+  components[3].value = CLOSE;
+  moving_state = GOING_DOWN;
+}
+
+/*
+Disable all outputs for safety reason, in case the connection is lost.
+*/
+void disable_outputs()
+{
+  digitalWrite(RELAY_1, LOW);
+  components[0].value = OPEN;
+  digitalWrite(RELAY_2, LOW);
+  components[1].value = OPEN;
+  digitalWrite(RELAY_3, LOW);
+  components[2].value = OPEN;
+  digitalWrite(RELAY_4, LOW);
+  components[3].value = OPEN;
+  moving_state = STOPPED;
 }
 
 /*
@@ -185,163 +112,79 @@ uint8 check_sum(char *value, int len)
 /*
 Parse UDP package received.
 */
-void parse_packet_gen(int package_len)
+void parse_packet(int package_len)
 {
   int ind = 0;
   int packet_count = 0;
   int comp = 0;
-
+  int resp_status = 0;
+  
   if(package_len == 4)
   {
     comp = packet[0] + 0;
-    if(comp == ACTUATE_SIMPLE){ // Open or close command for only one relay
-      for(ind = 0; ind < 4; ind++)
+    if(comp == ACTUATE_SIMPLE) // Open or close command for only one relay
+    {
+      if(running_state == GENERIC)
       {
-        comp = packet[1] + 0;
-        if(ind == (comp-1)){
-          comp = packet[2] + 0;
-          comute_relay(components[ind].pin, comp);
-          if(comp == CLOSE){
-            components[ind].value = CLOSE;
-          }
-          else if(comp == OPEN){
-            components[ind].value = OPEN;
-          }         
-          reply[0] = packet[0];
-          reply[1] = ind + 1;
-          reply[2] = packet[2];
-          reply[3] = 0x06;
-          reply[4] = reply[0] +  reply[1] +  reply[2] +  reply[3];
-          reply_len = 5;
-          break;
-        }
-      }
-    }
-    else if(comp == ACTUATE_MULTIPLE){ // Open or close command for multiple relays
-      for(ind = 0; ind < 4; ind++)
-      {
-        comp = packet[1] + 0;
-        if(bitRead(comp, ind)){
-          comp = packet[2] + 0;
-          comute_relay(components[ind].pin, bitRead(comp, ind));
-          if(comp == CLOSE){
-            components[ind].value = CLOSE;
-          }
-          else if(comp == OPEN){
-            components[ind].value = OPEN;
+        for(ind = 0; ind < 4; ind++)
+        {
+          comp = packet[1] + 0;
+          if(ind == (comp-1)){
+            comp = packet[2] + 0;
+            comute_relay(components[ind].pin, comp);
+            if(comp == CLOSE){
+              components[ind].value = CLOSE;
+            }
+            else if(comp == OPEN){
+              components[ind].value = OPEN;
+            }         
+            reply[0] = packet[0];
+            reply[1] = ind + 1;
+            reply[2] = packet[2];
+            reply[3] = 0x06;
+            reply[4] = reply[0] +  reply[1] +  reply[2] +  reply[3];
+            reply_len = 5;
+            break;
           }
         }
       }
-      reply[0] = packet[0];
-      reply[1] = (packet[1] & 0x0F);
-      reply[2] = (packet[2] & 0x0F);
-      reply[3] = 0x06;
-      reply[4] = reply[0] +  reply[1] +  reply[2] +  reply[3];
-      reply_len = 5;
+      else{
+        reply[0] = NACK;
+        reply_len = 1;
+      }
     }
-    else if(comp == MULTIPLE_REQUEST){ // Request for multiple status on relays and switches
-      reply[0] = packet[0];
-      reply[1] = (packet[1] & 0x0F);
-      reply[2] = (packet[2] & 0x07);
-
-      // Get relays status
-      reply[3] = 0;
-      comp = packet[1] + 0;
-      
-      for(ind = 0; ind < 4; ind++)
+    else if(comp == ACTUATE_MULTIPLE) // Open or close command for multiple relays
+    {
+      if(running_state == GENERIC)
       {
-        reply[3] = (reply[3] | (components[ind].value << ind));
+        for(ind = 0; ind < 4; ind++)
+        {
+          comp = packet[1] + 0;
+          if(bitRead(comp, ind)){
+            comp = packet[2] + 0;
+            comute_relay(components[ind].pin, bitRead(comp, ind));
+            if(bitRead(comp, ind) == CLOSE){
+              components[ind].value = CLOSE;
+            }
+            else if(bitRead(comp, ind) == OPEN){
+              components[ind].value = OPEN;
+            }
+          }
+        }
+        reply[0] = packet[0];
+        reply[1] = (packet[1] & 0x0F);
+        reply[2] = (packet[2] & 0x0F);
+        reply[3] = 0x06;
+        reply[4] = reply[0] +  reply[1] +  reply[2] +  reply[3];
+        reply_len = 5;
       }
-      
-      // Get switches status
-      reply[4] = 0;
-      comp = packet[2] + 0;
-      for(ind = 0; ind < 3; ind++)
-      {
-        reply[4] = (reply[4] | (components[ind+4].value << ind));
-      }
-      
-      reply[5] = 0x06; // ACK
-      reply[6] = reply[0] + reply[1] + reply[2] + reply[3] + reply[4] + reply[5]; // Simple CS
-      reply_len = 7;
-    }
-  }
-  else if(package_len == 3)
-  {
-    comp = packet[0] + 0;
-    if(comp == SIMPLE_REQUEST){ // Request for only a component status
-      comp = packet[1] + 0;
-      switch(comp){
-        case RELAY1: // Get relay1 status
-        reply[0] = packet[0];
-        reply[1] = RELAY1;
-        reply[2] = components[0].value;
-        reply[3] = reply[0] +  reply[1] +  reply[2];
-        reply_len = 4;
-        break;
-        case RELAY2: // Get relay2 status
-        reply[0] = packet[0];
-        reply[1] = RELAY2;
-        reply[2] = components[1].value;
-        reply[3] = reply[0] +  reply[1] +  reply[2];
-        reply_len = 4;
-        break;
-        case RELAY3: // Get relay3 status
-        reply[0] = packet[0];
-        reply[1] = RELAY3;
-        reply[2] = components[2].value;
-        reply[3] = reply[0] +  reply[1] +  reply[2];
-        reply_len = 4;
-        break;
-        case RELAY4: // Get relay4 status
-        reply[0] = packet[0];
-        reply[1] = RELAY4;
-        reply[2] = components[3].value;
-        reply[3] = reply[0] +  reply[1] +  reply[2];
-        reply_len = 4;
-        break;
-        case FUNC_MODE: // Get functional mode status
-        reply[0] = packet[0];
-        reply[1] = FUNC_MODE;
-        components[4].value = (digitalRead(FUNC_MODE_PIN) ? CLOSE : OPEN);
-        reply[2] = components[4].value;
-        reply[3] = reply[0] +  reply[1] +  reply[2];
-        reply_len = 4;
-        break;
-        case TOP_SWITCH: // Get top end switch status
-        reply[0] = packet[0];
-        reply[1] = TOP_SWITCH;
-        components[5].value = (digitalRead(TOP_SWITCH_PIN) ? CLOSE : OPEN);
-        reply[2] = components[5].value;
-        reply[3] = reply[0] +  reply[1] +  reply[2];
-        reply_len = 4;
-        break;
-        case BOTTOM_SWITCH: // Get bottom end switch status
-        reply[0] = packet[0];
-        reply[1] = BOTTOM_SWITCH;
-        components[6].value = (digitalRead(BOTTOM_SWITCH_PIN) ? CLOSE : OPEN);
-        reply[2] = components[6].value;
-        reply[3] = reply[0] +  reply[1] +  reply[2];
-        reply_len = 4;
-        break;
+      else{
+        reply[0] = NACK;
+        reply_len = 1;
       }
     }
-  }
-}
-
-/*
-Parse UDP package received.
-*/
-void parse_packet_opt(int package_len)
-{
-  int ind = 0;
-  int packet_count = 0;
-  int comp = 0;
-
-  if(package_len == 4)
-  {
-    comp = packet[0] + 0;
-    if(comp == MULTIPLE_REQUEST){ // Request for multiple status on relays and switches
+    else if(comp == MULTIPLE_REQUEST) // Request for multiple status on relays and switches
+    {
       reply[0] = packet[0];
       reply[1] = (packet[1] & 0x0F);
       reply[2] = (packet[2] & 0x07);
@@ -367,86 +210,250 @@ void parse_packet_opt(int package_len)
       reply[6] = reply[0] + reply[1] + reply[2] + reply[3] + reply[4] + reply[5]; // Simple CS
       reply_len = 7;
     }
-    else if(comp == PROGRAM_SETTINGS){
+    else if(comp == PROGRAM_SETTINGS)
+    {
       comp = packet[1] + 0;
-      if(comp == SET_RELAYS_DELAY){
+      if(comp == SET_RELAYS_DELAY)
+      {
         int new_delay = (packet[2] << 0x08) | packet[3];
-        if(new_delay < 500){
-          new_delay = 500;
+        if(new_delay > 26000){ // 26 seconds is the maximum time for timer configuration
+          new_delay = 26000;
         }
         disable_outputs();
-        time_delay = new_delay;
-        
+        time_delay = new_delay; // Update fixed timing
+        if(time_delay == 0){ // If time was set to 0s, it's because the continuous mode is selected, no timer is used in this mode
+          disable_outputs();
+          ITimer.disableTimer();
+        }
+        // Send response
         reply[0] = packet[0];
         reply[1] = SET_RELAYS_DELAY;
-        reply[2] = packet[2];
-        reply[3] = packet[3];
+        reply[2] = ((time_delay >> 0x08) & (0xFF));
+        reply[3] = (time_delay & 0xFF);
         reply[4] = ACK;
         reply_len = 5;
+      }
+      else if(comp == CHANGE_CODE)
+      {
+        comp = packet[2] + 0;
+        switch(comp){
+          case GENERIC_CODE: // Run generic code
+          running_state = GENERIC;
+          disable_outputs();
+          // Send response
+          reply[0] = packet[0];
+          reply[1] = CHANGE_CODE;
+          reply[2] = GENERIC_CODE;
+          reply[3] = ACK;
+          reply[4] = reply[0] +  reply[1] +  reply[2] + reply[3];
+          reply_len = 5;
+          break;
+          case OPTIMIZED_CODE: // Run optimized code
+          running_state = OPTIMIZED;
+          disable_outputs();
+          // Send response
+          reply[0] = packet[0];
+          reply[1] = CHANGE_CODE;
+          reply[2] = OPTIMIZED_CODE;
+          reply[3] = ACK;
+          reply[4] = reply[0] +  reply[1] +  reply[2] + reply[3];
+          reply_len = 5;
+          break;
+        }
+      }
+      else{
+        reply[0] = NACK;
+        reply_len = 1;
       }
     }
   }
   else if(package_len == 3)
   {
     comp = packet[0] + 0;
-    if(comp == SIMPLE_REQUEST){ // Connection status request
-      reply[0] = packet[0];
-      reply[1] = 0x00;
-      reply[2] = ACK;
-      reply[3] = reply[0] +  reply[1] +  reply[2];
-      reply_len = 4;
+    if(comp == ACTUATE_SIMPLE)
+    {
+      if(running_state == OPTIMIZED) // Command to change relays status
+      {
+        comp = packet[1] + 0;
+        switch(comp){
+          case STOP: // Stop motor
+          disable_outputs();
+          reply[0] = packet[0];
+          reply[1] = STOP;
+          reply[2] = ACK;
+          reply[3] = reply[0] +  reply[1] +  reply[2];
+          reply_len = 4;
+          break;
+          case GO_DOWN: // Move stand down
+          if(time_delay != 0){
+            if(ITimer.setInterval((long int)time_delay * 1000, TimerHandler) == true){
+              go_down();
+              resp_status = 1;
+            }
+            else{
+              resp_status = 0;
+            }
+          }
+          else{
+            go_down();
+            resp_status = 1;
+          }
+          if(resp_status != 0){
+            reply[0] = packet[0];
+            reply[1] = GO_DOWN;
+            reply[2] = ACK;
+            reply[3] = reply[0] +  reply[1] +  reply[2];
+            reply_len = 4;
+          }
+          else{
+            reply[0] = packet[0];
+            reply[1] = GO_DOWN;
+            reply[2] = NACK;
+            reply[3] = reply[0] +  reply[1] +  reply[2];
+            reply_len = 4;
+          }
+          break;
+          case GO_UP: // Move stand up
+          if(time_delay != 0){
+            if(ITimer.setInterval((long int)time_delay * 1000, TimerHandler) == true){
+              go_up();
+              resp_status = 1;
+            }
+            else{
+              resp_status = 0;
+            }
+          }
+          else{
+            go_up();
+            resp_status = 1;
+          }
+          if(resp_status != 0){
+            reply[0] = packet[0];
+            reply[1] = GO_UP;
+            reply[2] = ACK;
+            reply[3] = reply[0] +  reply[1] +  reply[2];
+            reply_len = 4;
+          }
+          else{
+            reply[0] = packet[0];
+            reply[1] = GO_UP;
+            reply[2] = NACK;
+            reply[3] = reply[0] +  reply[1] +  reply[2];
+            reply_len = 4;
+          }
+          break;
+          default:
+          reply[0] = NACK;
+          reply_len = 1;
+          break;
+        }
+      }
+      else{
+        reply[0] = NACK;
+        reply_len = 1;
+      }
     }
-    else if(comp == ACTUATE_SIMPLE){ // Command to change relays status
+    else if(comp == SIMPLE_REQUEST) // Request for only a component status
+    {
       comp = packet[1] + 0;
       switch(comp){
-        case STOP: // Stop motor
-        disable_outputs();
+        case CONNECTION:
         reply[0] = packet[0];
-        reply[1] = STOP;
-        reply[2] = ACK;
-        reply[3] = reply[0] +  reply[1] +  reply[2];
-        reply_len = 4;
+        reply[1] = CONNECTION;
+        reply[2] = CONNECTION;
+        reply[3] = ACK;
+        reply[4] = reply[0] +  reply[1] +  reply[2] + reply[3];
+        reply_len = 5;
         break;
-        case GO_DOWN: // Move stand down
-        go_down();
+        case RELAY1: // Get relay1 status
         reply[0] = packet[0];
-        reply[1] = GO_DOWN;
-        reply[2] = ACK;
-        reply[3] = reply[0] +  reply[1] +  reply[2];
-        reply_len = 4;
+        reply[1] = RELAY1;
+        reply[2] = components[0].value;
+        reply[3] = ACK;
+        reply[4] = reply[0] +  reply[1] +  reply[2] + reply[3];
+        reply_len = 5;
         break;
-        case GO_UP: // Move stand up
-        go_up();
+        case RELAY2: // Get relay2 status
         reply[0] = packet[0];
-        reply[1] = GO_UP;
-        reply[2] = ACK;
-        reply[3] = reply[0] +  reply[1] +  reply[2];
-        reply_len = 4;
+        reply[1] = RELAY2;
+        reply[2] = components[1].value;
+        reply[3] = ACK;
+        reply[4] = reply[0] +  reply[1] +  reply[2] + reply[3];
+        reply_len = 5;
+        break;
+        case RELAY3: // Get relay3 status
+        reply[0] = packet[0];
+        reply[1] = RELAY3;
+        reply[2] = components[2].value;
+        reply[3] = ACK;
+        reply[4] = reply[0] +  reply[1] +  reply[2] + reply[3];
+        reply_len = 5;
+        break;
+        case RELAY4: // Get relay4 status
+        reply[0] = packet[0];
+        reply[1] = RELAY4;
+        reply[2] = components[3].value;
+        reply[3] = ACK;
+        reply[4] = reply[0] +  reply[1] +  reply[2] + reply[3];
+        reply_len = 5;
+        break;
+        case FUNC_MODE: // Get functional mode status
+        reply[0] = packet[0];
+        reply[1] = FUNC_MODE;
+        components[4].value = (digitalRead(FUNC_MODE_PIN) ? CLOSE : OPEN);
+        reply[2] = components[4].value;
+        reply[3] = ACK;
+        reply[4] = reply[0] +  reply[1] +  reply[2] + reply[3];
+        reply_len = 5;
+        break;
+        case TOP_SWITCH: // Get top end switch status
+        reply[0] = packet[0];
+        reply[1] = TOP_SWITCH;
+        components[5].value = (digitalRead(TOP_SWITCH_PIN) ? CLOSE : OPEN);
+        reply[2] = components[5].value;
+        reply[3] = ACK;
+        reply[4] = reply[0] +  reply[1] +  reply[2] + reply[3];
+        reply_len = 5;
+        break;
+        case BOTTOM_SWITCH: // Get bottom end switch status
+        reply[0] = packet[0];
+        reply[1] = BOTTOM_SWITCH;
+        components[6].value = (digitalRead(BOTTOM_SWITCH_PIN) ? CLOSE : OPEN);
+        reply[2] = components[6].value;
+        reply[3] = ACK;
+        reply[4] = reply[0] +  reply[1] +  reply[2] + reply[3];
+        reply_len = 5;
+        break;
+        default:
+        reply[0] = NACK;
+        reply_len = 1;
         break;
       }
     }
-//    else if(comp == PROGRAM_SETTINGS){
-//      comp = packet[1] + 0;
-//      switch(comp){
-//        case GENERIC_CODE: // Stop motor
-//        disable_outputs();
-//        reply[0] = packet[0];
-//        reply[1] = GENERIC_CODE;
-//        reply[2] = ACK;
-//        reply[3] = reply[0] +  reply[1] +  reply[2];
-//        reply_len = 4;
-//        break;
-//        case OPTIMIZED_CODE: // Move stand down
-//        disable_outputs();
-//        reply[0] = packet[0];
-//        reply[1] = OPTIMIZED_CODE;
-//        reply[2] = ACK;
-//        reply[3] = reply[0] +  reply[1] +  reply[2];
-//        reply_len = 4;
-//        break;
-//      }
-//    }
   }
+  else{
+    reply[0] = NACK;
+    reply_len = 1;
+  }
+}
+
+/*
+Configured UDP server.
+*/
+void configure_UDP_server()
+{
+  // Connected to WiFi
+  Serial.println();
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+   
+  // Begin listening to UDP port
+  UDP.begin(UDP_PORT);
+  Serial.print("Listening on UDP port ");
+  Serial.println(UDP_PORT);
+
+  // Update the connection status
+  connection_state = RUNNING;
 }
 
 /*
@@ -482,51 +489,11 @@ void connect_to_wifi_network(IPAddress ip, IPAddress gateway, IPAddress submask)
 }
 
 /*
-Switch relays to go up.
-*/
-void go_up()
-{
-  disable_outputs();
-  digitalWrite(RELAY_4, HIGH);
-  components[3].value = CLOSE;
-  moving_state = GOING_UP;
-}
-
-/*
-Switch relays to go down.
-*/
-void go_down()
-{
-  disable_outputs();
-  digitalWrite(RELAY_3, HIGH);
-  components[2].value = CLOSE;
-  moving_state = GOING_DOWN;
-}
-
-/*
-Disable all outputs for safety reason, in case the connection is lost.
-*/
-void disable_outputs()
-{
-  digitalWrite(RELAY_1, LOW);
-  components[0].value = OPEN;
-  digitalWrite(RELAY_2, LOW);
-  components[1].value = OPEN;
-  digitalWrite(RELAY_3, LOW);
-  components[2].value = OPEN;
-  digitalWrite(RELAY_4, LOW);
-  components[3].value = OPEN;
-  moving_state = STOPPED;
-  delay(50);
-}
-
-/*
 Function that reconnect to the WiFi after disconnection.
 */
 
 void wifi_reconnect()
 {
-  disable_outputs();
   WiFi.disconnect();
   delay(10);
   // Begin WiFi
@@ -719,56 +686,25 @@ void loop() {
           int len = UDP.read(packet, 255);
     
           if(check_sum(packet, len) == SUCCESS){
-            parse_packet_opt(len);
-    
+            parse_packet(len);
             // Send response packet
             UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
             UDP.write(reply, reply_len);
             UDP.endPacket();
-          }else if((len == 4) && (packet[0] == PROGRAM_SETTINGS) && (packet[1] == SET_RELAYS_DELAY)){
-              parse_packet_opt(len);
+          }
+          else if((len == 4) && (packet[0] == PROGRAM_SETTINGS) && (packet[1] == SET_RELAYS_DELAY)){
+            // If checksum failed, it might be a set time command for fixed time mode
+            parse_packet(len);
 
-              // Send response packet
-              UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
-              UDP.write(reply, reply_len);
-              UDP.endPacket();
+            // Send response packet
+            UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
+            UDP.write(reply, reply_len);
+            UDP.endPacket();
           }else{
             Serial.print("Packet received, but check sum not ok!");
           }
         }
       }
-//      delay(time_delay);
-//      if(digitalRead(TOP_SWITCH_PIN) && (moving_state != STOPPED))
-//      {
-//        disable_outputs();
-//        reply[0] = ACTUATE_SIMPLE;
-//        reply[1] = STOP;
-//        reply[2] = GO_UP;
-//        reply[3] = ACK;
-//        reply[4] = reply[0] + reply[1] + reply[2] + reply[3];
-//        reply_len = 5;
-//        
-//        // Send response packet
-//        UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
-//        UDP.write(reply, reply_len);
-//        UDP.endPacket();
-//        
-//      }
-//      if(digitalRead(BOTTOM_SWITCH_PIN) && (moving_state != STOPPED))
-//      {
-//        disable_outputs();
-//        reply[0] = ACTUATE_SIMPLE;
-//        reply[1] = STOP;
-//        reply[2] = GO_DOWN;
-//        reply[3] = ACK;
-//        reply[4] = reply[0] + reply[1] + reply[2] + reply[3];
-//        reply_len = 5;
-//        
-//        // Send response packet
-//        UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
-//        UDP.write(reply, reply_len);
-//        UDP.endPacket();
-//      }
       // If WIFI_CONF pin is low, then restart the ESP to erase previous configurations
       if(digitalRead(WIFI_CONF) == LOW){
         ESP.reset();  
@@ -786,6 +722,7 @@ void loop() {
   // If just disconnected, update the connection state and start reconnection routine
   if(connection_state != DISCONNECTED){
     connection_state = DISCONNECTED;
+    disable_outputs();
     wifi_reconnect();
   }else{
     // While has not reconnected print dots
