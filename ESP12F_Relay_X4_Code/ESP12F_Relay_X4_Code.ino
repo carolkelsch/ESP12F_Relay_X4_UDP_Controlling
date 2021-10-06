@@ -676,7 +676,7 @@ void loop() {
   while (WiFi.status() == WL_CONNECTED)
   {
     // If is on auto mode
-    while(digitalRead(FUNC_MODE_PIN))
+    if(digitalRead(FUNC_MODE_PIN) == true)
     {
       // If UDP server is UP, wait for UPD packages
       if(connection_state == RUNNING){
@@ -702,6 +702,12 @@ void loop() {
             UDP.endPacket();
           }else{
             Serial.print("Packet received, but check sum not ok!");
+            // Send response packet
+            reply[0] = NACK;
+            reply_len = 1;
+            UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
+            UDP.write(reply, reply_len);
+            UDP.endPacket();
           }
         }
       }
@@ -717,7 +723,9 @@ void loop() {
         Serial.println(WiFi.localIP());
       }
     }
-    disable_outputs();
+    else{
+      disable_outputs();
+    }
   }
   // If just disconnected, update the connection state and start reconnection routine
   if(connection_state != DISCONNECTED){
