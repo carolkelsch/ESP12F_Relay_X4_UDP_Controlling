@@ -676,56 +676,50 @@ void loop() {
   // If is connected on WiFi
   while (WiFi.status() == WL_CONNECTED)
   {
-    // If is on auto mode
-    if(digitalRead(FUNC_MODE_PIN) == true)
-    {
-      // If UDP server is UP, wait for UPD packages
-      if(connection_state == RUNNING){
-        int packetSize = UDP.parsePacket();
+    // If UDP server is UP, wait for UPD packages
+    if(connection_state == RUNNING){
+      int packetSize = UDP.parsePacket();
         
-        if (packetSize) {
-          int len = UDP.read(packet, 255);
+      if (packetSize) {
+        int len = UDP.read(packet, 255);
     
-          if(check_sum(packet, len) == SUCCESS){
-            parse_packet(len);
-            // Send response packet
-            UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
-            UDP.write(reply, reply_len);
-            UDP.endPacket();
-          }
-          else if((len == 4) && (packet[0] == PROGRAM_SETTINGS) && (packet[1] == SET_RELAYS_DELAY)){
-            // If checksum failed, it might be a set time command for fixed time mode
-            parse_packet(len);
+        if(check_sum(packet, len) == SUCCESS){
+          parse_packet(len);
+          // Send response packet
+          UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
+          UDP.write(reply, reply_len);
+          UDP.endPacket();
+        }
+        else if((len == 4) && (packet[0] == PROGRAM_SETTINGS) && (packet[1] == SET_RELAYS_DELAY)){
+          // If checksum failed, it might be a set time command for fixed time mode
+          parse_packet(len);
 
-            // Send response packet
-            UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
-            UDP.write(reply, reply_len);
-            UDP.endPacket();
-          }else{
-            Serial.print("Packet received, but check sum not ok!");
-            // Send response packet
-            reply[0] = NACK;
-            reply_len = 1;
-            UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
-            UDP.write(reply, reply_len);
-            UDP.endPacket();
-          }
+          // Send response packet
+          UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
+          UDP.write(reply, reply_len);
+          UDP.endPacket();
+        }else{
+          Serial.print("Packet received, but check sum not ok!");
+          // Send response packet
+          reply[0] = NACK;
+          reply_len = 1;
+          UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
+          UDP.write(reply, reply_len);
+          UDP.endPacket();
         }
       }
-      // If WIFI_CONF pin is low, then restart the ESP to erase previous configurations
-      if(digitalRead(WIFI_CONF) == LOW){
-        ESP.reset();  
-      }
-      // If came back from a disconnection, update the connection state and inform new IP
-      if(connection_state == DISCONNECTED){
-        connection_state = RUNNING;
-        Serial.println();
-        Serial.print("Connected! IP address: ");
-        Serial.println(WiFi.localIP());
-      }
     }
-    else{
+    // If WIFI_CONF pin is low, then restart the ESP to erase previous configurations
+    if(digitalRead(WIFI_CONF) == LOW){
       disable_outputs();
+      ESP.reset();  
+    }
+    // If came back from a disconnection, update the connection state and inform new IP
+    if(connection_state == DISCONNECTED){
+      connection_state = RUNNING;
+      Serial.println();
+      Serial.print("Connected! IP address: ");
+      Serial.println(WiFi.localIP());
     }
     components[4].value = (digitalRead(FUNC_MODE_PIN) ? CLOSE : OPEN);
     components[5].value = (digitalRead(TOP_SWITCH_PIN) ? CLOSE : OPEN);
